@@ -1,7 +1,5 @@
 # Resource-allocation-system-for-a-cloud-computing-environment
 
-# Cloud Computing Resource Allocation System
-
 ## Overview
 This project implements a resource allocation system for a cloud computing environment. The system efficiently allocates available resources based on user-defined priorities while ensuring the integrity of the resource structure.
 

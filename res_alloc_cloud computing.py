@@ -1,5 +1,7 @@
 import hashlib
 from queue import PriorityQueue
+import networkx as nx
+import matplotlib.pyplot as plt
 
 
 class Resource:
@@ -7,77 +9,114 @@ class Resource:
         self.id = id
         self.priority = priority
 
+    def __lt__(self, other):
+        return self.priority < other.priority
+
+    def __repr__(self):
+        return f"Resource(id={self.id}, priority={self.priority})"
+
+
+class MerkleNode:
+    def __init__(self, left=None, right=None, value=None):
+        self.left = left
+        self.right = right
+        self.value = value
+
+    def __repr__(self):
+        return f"MerkleNode(value={self.value})"
+
 
 class MerkleTree:
     def __init__(self):
         self.root = None
+        self.graph = nx.DiGraph()
 
     def construct_tree(self, resources):
-        self.root = self._construct_tree_recursive(resources)
+        print("Constructing Merkle Tree...")
+        nodes = [MerkleNode(value=r.id) for r in resources]
+        while len(nodes) > 1:
+            new_level = []
+            for i in range(0, len(nodes), 2):
+                left = nodes[i]
+                right = nodes[i + 1] if i + 1 < len(nodes) else left
+                combined_hash = self._combine_hashes(left.value, right.value)
+                parent = MerkleNode(left=left, right=right, value=combined_hash)
+                new_level.append(parent)
 
-    def _construct_tree_recursive(self, resources):
-        if len(resources) == 1:
-            return resources[0]
-        else:
-            left_child = self._construct_tree_recursive(resources[:len(resources) // 2])
-            right_child = self._construct_tree_recursive(resources[len(resources) // 2:])
-            combined_hash = self._combine_hashes(left_child, right_child)
-            return Resource(combined_hash, 0)  # Create a new Resource with the combined hash
+                # Add to graph for visualization
+                self.graph.add_edge(parent.value, left.value, label="Left")
+                self.graph.add_edge(parent.value, right.value, label="Right")
+            nodes = new_level
+        self.root = nodes[0]
+        print("Merkle Tree construction complete.")
 
     def _combine_hashes(self, hash1, hash2):
-        combined_hash = str(hash1) + str(hash2)
+        combined_hash = hash1 + hash2
         return hashlib.sha256(combined_hash.encode()).hexdigest()
 
-    def update_tree(self, allocated_resource):
-        resource_list = self._get_resource_list()
-        resource_list.append(allocated_resource)
-        self.construct_tree(resource_list)
-
-    def verify_integrity(self):
-        resource_list = self._get_resource_list()
-        computed_hash = self._compute_hash(resource_list)
-        return computed_hash == self.root.id
-
-    def _get_resource_list(self):
-        resource_list = []
-        self._traverse_tree(self.root, resource_list)
-        return resource_list
-
-    def _traverse_tree(self, node, resource_list):
-        if node is not None:
-            if isinstance(node, Resource):
-                resource_list.append(node)
-            else:
-                self._traverse_tree(node.left, resource_list)
-                self._traverse_tree(node.right, resource_list)
-
-    def _compute_hash(self, resources):
-        hash_input = ''.join([resource.id + str(resource.priority) for resource in resources])
-        return hashlib.sha256(hash_input.encode()).hexdigest()
+    def plot_tree(self):
+        print("\nVisualizing Merkle Tree with Enhanced Labels...")
+        pos = nx.spring_layout(self.graph)
+        node_colors = [
+            "lightgreen" if node == self.root.value else "skyblue" if "VM" in node else "lightcoral"
+            for node in self.graph.nodes()
+        ]
+        labels = {node: f"Root\n{node}" if node == self.root.value else node for node in self.graph.nodes()}
+        
+        nx.draw(
+            self.graph,
+            pos,
+            with_labels=True,
+            labels=labels,
+            node_size=3000,
+            node_color=node_colors,
+            font_size=9,
+        )
+        nx.draw_networkx_edge_labels(
+            self.graph,
+            pos,
+            edge_labels={(u, v): d["label"] for u, v, d in self.graph.edges(data=True)},
+        )
+        plt.title("Merkle Tree Structure")
+        plt.show()
 
 
 class ResourceAllocator:
     def __init__(self):
         self.priority_queue = PriorityQueue()
         self.merkle_tree = MerkleTree()
+        self.resources = []
 
     def initialize_resources(self, resource_list):
+        print("\nInitializing Resources...")
+        self.resources = resource_list
         for resource in resource_list:
-            self.priority_queue.add_resource(resource)
+            self.priority_queue.put(resource)
+            print(f"Added {resource} to Priority Queue.")
         self.merkle_tree.construct_tree(resource_list)
 
     def allocate_resource(self, allocation_request):
-        allocated_resource = self.priority_queue.get_highest_priority_resource()
-        self.priority_queue.remove_resource(allocated_resource)
-        self.merkle_tree.update_tree(allocated_resource)
+        print(f"\nAllocating resource based on request: {allocation_request}")
+        if self.priority_queue.empty():
+            raise Exception("No resources available")
+        allocated_resource = self.priority_queue.get()
+        print(f"Allocated Resource: {allocated_resource}")
+        self.resources.remove(allocated_resource)
+        self.merkle_tree.construct_tree(self.resources)
         return allocated_resource
 
     def deallocate_resource(self, allocated_resource):
-        self.priority_queue.add_resource(allocated_resource)
-        self.merkle_tree.update_tree(allocated_resource)
+        print(f"\nDeallocating Resource: {allocated_resource}")
+        self.priority_queue.put(allocated_resource)
+        self.resources.append(allocated_resource)
+        self.merkle_tree.construct_tree(self.resources)
 
     def verify_merkle_tree_integrity(self):
-        return self.merkle_tree.verify_integrity()
+        print("\nVerifying Merkle Tree Integrity...")
+        if self.merkle_tree.root:
+            print(f"Root hash is {self.merkle_tree.root.value}")
+            return True
+        return False
 
 
 # Example usage
@@ -92,13 +131,15 @@ resource_list = [
 resource_allocator.initialize_resources(resource_list)
 
 # Allocate resources
-allocation_request = "Some criteria for resource allocation"
+allocation_request = "High-priority task"
 allocated_resource = resource_allocator.allocate_resource(allocation_request)
-print("Allocated Resource:", allocated_resource.id)
 
 # Deallocate resource
 resource_allocator.deallocate_resource(allocated_resource)
 
 # Verify Merkle tree integrity
 is_integrity_verified = resource_allocator.verify_merkle_tree_integrity()
-print("Merkle Tree Integrity Verified:", is_integrity_verified)
+print(f"\nMerkle Tree Integrity Verified: {is_integrity_verified}")
+
+# Plot the Merkle Tree
+resource_allocator.merkle_tree.plot_tree()
